@@ -57,6 +57,8 @@ UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
 
+extern uint32_t SystemCoreClock;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -184,6 +186,43 @@ void vApplicationTickHook(void);
 void vApplicationTickHook(void) {
 }
 
+/**
+ * @brief  Busy-wait delay using inline NOPs (32-bit only).
+ * @note   Suitable for CPU load testing, RTOS timing, etc.
+ * @param  ms: delay time in milliseconds (approximate)
+ */
+static inline void cpu_burn_ms( uint32_t ms ) {
+    if ( 0UL == ms ) {
+    	return;
+    }
+
+    // Approximate cycles to burn for 1 ms, keeping in 32-bit range.
+    // e.g., SystemCoreClock = 80 MHz → 80,000 cycles per ms.
+    // We use 32-bit math, so it’s fine up to ~50 seconds at 80 MHz.
+
+    uint32_t cycles_per_ms = SystemCoreClock / 1000U;
+
+    // Estimated cycles per loop iteration (~5 cycles per iteration)
+    // Using double to avoid float calculation
+    const uint32_t cycles_per_loop = 5U;
+    uint32_t iterations = (cycles_per_ms / cycles_per_loop) * ms;
+
+    if ( 0U == iterations ) {
+        return;
+    }
+
+    // Inline assembly loop — runs exactly 'iterations' times
+    __asm__ volatile (
+        "1: \n\t"
+        "   nop \n\t"
+        "   subs %[cnt], %[cnt], #1 \n\t"
+        "   bne 1b \n\t"
+        : [cnt] "+r" (iterations)
+        :
+        : "cc"
+    );
+}
+
 static void TaskL( void * parameters ) {
     /* Unused parameters. */
     ( void ) parameters;
@@ -192,6 +231,7 @@ static void TaskL( void * parameters ) {
     for( ; ; ) {
         /* Example Task Code */
     	printf( "Low Priority task! Run: %ld\r\n", u32_cnt++ );
+    	cpu_burn_ms( 50 );
         vTaskDelay( 1000U ); /* delay 100 ticks */
     }
 }
@@ -204,6 +244,7 @@ static void TaskM( void * parameters ) {
     for( ; ; ) {
         /* Example Task Code */
     	printf( "Medium Priority Task! Run: %ld\r\n", u32_cnt++ );
+    	cpu_burn_ms( 25 );
         vTaskDelay( 500U ); /* delay 500 ticks */
     }
 }
@@ -216,6 +257,7 @@ static void TaskH( void * parameters ) {
     for( ; ; ) {
         /* Example Task Code */
     	printf( "High Priority Task! Run: %ld\r\n", u32_cnt++ );
+    	cpu_burn_ms( 10 );
         vTaskDelay( 250U ); /* delay 2500 ticks */
     }
 }
