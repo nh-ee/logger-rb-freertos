@@ -54,6 +54,7 @@
 
 /* Private variables ---------------------------------------------------------*/
 UART_HandleTypeDef huart1;
+DMA_HandleTypeDef hdma_usart1_tx;
 
 /* USER CODE BEGIN PV */
 
@@ -64,6 +65,7 @@ extern uint32_t SystemCoreClock;
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
 static void MX_USART1_UART_Init(void);
 /* USER CODE BEGIN PFP */
 
@@ -72,17 +74,53 @@ static void MX_USART1_UART_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+#define UART_BUFFER_SIZE 32
+uint8_t uart_tx_buffer_1[UART_BUFFER_SIZE];
+uint8_t uart_tx_buffer_2[UART_BUFFER_SIZE];
+
+uint8_t *current_buffer = uart_tx_buffer_1;
+uint8_t *transmit_buffer = uart_tx_buffer_1;
+volatile uint16_t uart_tx_idx = 0;
+volatile uint8_t tx_in_progress = 1;
+
 /**
   * @brief  Retargets the C library printf function to the USART.
   * @param  None
   * @retval None
   */
 PUTCHAR_PROTOTYPE {
-  /* Place your implementation of fputc here */
-  /* e.g. write a character to the LPUART1 and Loop until the end of transmission */
-  HAL_UART_Transmit( &huart1, (uint8_t *)&ch, 1, 0xFFFF );
+    /* Place your implementation of fputc here */
+    /* e.g. write a character to the LPUART1 and Loop until the end of transmission */
+    //HAL_UART_Transmit( &huart1, (uint8_t *)&ch, 1, 0xFFFF );
 
-  return ch;
+	// If the current buffer is full, swap the buffers and start DMA transfer
+	if ( uart_tx_idx >= UART_BUFFER_SIZE || ch == '\n' ) {
+		// Swap buffers if DMA isn't already in progress
+		if ( !tx_in_progress ) {
+			// Start DMA transfer of the current buffer
+			tx_in_progress = 1;
+
+			transmit_buffer = current_buffer;
+
+			HAL_UART_Transmit_DMA( &huart1, transmit_buffer, uart_tx_idx );
+
+			// Reset the buffer index for the next transmission
+			uart_tx_idx = 0;
+
+			// Swap the buffers: fill the current buffer with new data
+			if ( current_buffer == uart_tx_buffer_1 ) {
+				current_buffer = uart_tx_buffer_2;
+			}
+			else {
+				current_buffer = uart_tx_buffer_1;
+			}
+		}
+	}
+
+	// Add the character to the current buffer
+	current_buffer[uart_tx_idx++] = (uint8_t) ch;
+
+    return ch;
 }
 
 /*********************************************************************
@@ -262,6 +300,17 @@ static void TaskH( void * parameters ) {
     }
 }
 
+static void DMATxDone( DMA_HandleTypeDef *phdma ) {
+	(void) phdma;
+
+	//HAL_UART_DMAStop( &huart1 );
+
+	HAL_GPIO_WritePin( LED2_GPIO_Port, LED2_Pin, GPIO_PIN_RESET );
+
+	//huart1.Instance->CR3 &= ~USART_CR3_DMAT;
+}
+
+const uint8_t u8_msg[] = "FreeRTOS Example Project\r\n";
 
 /* USER CODE END 0 */
 
@@ -294,37 +343,44 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
 
+    HAL_GPIO_WritePin( LED2_GPIO_Port, LED2_Pin, GPIO_PIN_SET );
+
+  	//printf( "FreeRTOS Example Project\r\n\r\n" );
+  	HAL_UART_Transmit_DMA( &huart1, u8_msg, sizeof(u8_msg)-1 );
+
+  	while ( HAL_UART_STATE_READY != HAL_UART_GetState( &huart1 ) );
+
+    traceSTART();
+
+    xTaskCreate( TaskL,
+                 "TaskL",
+                 configMINIMAL_STACK_SIZE,
+                 NULL,
+                 10U,
+                 NULL );
+
+    xTaskCreate( TaskM,
+                 "TaskM",
+                 configMINIMAL_STACK_SIZE,
+                 NULL,
+                 20U,
+                 NULL );
+
+    xTaskCreate( TaskH,
+                 "TaskH",
+                 configMINIMAL_STACK_SIZE,
+                 NULL,
+                 30U,
+                 NULL );
+
+    /* Start the scheduler. */
+    vTaskStartScheduler();
+
   /* USER CODE END 2 */
-  printf( "FreeRTOS Example Project\r\n\r\n" );
-
-  traceSTART();
-
-  xTaskCreate( TaskL,
-               "TaskL",
-               configMINIMAL_STACK_SIZE,
-               NULL,
-               10U,
-               NULL );
-
-  xTaskCreate( TaskM,
-               "TaskM",
-               configMINIMAL_STACK_SIZE,
-               NULL,
-               20U,
-               NULL );
-
-  xTaskCreate( TaskH,
-               "TaskH",
-               configMINIMAL_STACK_SIZE,
-               NULL,
-               30U,
-               NULL );
-
-  /* Start the scheduler. */
-  vTaskStartScheduler();
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
@@ -421,6 +477,22 @@ static void MX_USART1_UART_Init(void)
   /* USER CODE BEGIN USART1_Init 2 */
 
   /* USER CODE END USART1_Init 2 */
+
+}
+
+/**
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA1_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA1_Channel4_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel4_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel4_IRQn);
 
 }
 

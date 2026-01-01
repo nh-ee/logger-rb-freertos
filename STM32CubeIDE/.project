@@ -39,7 +39,7 @@
 		<link>
 			<name>Middlewares</name>
 			<type>2</type>
-			<location>C:/Users/Admin/STM32CubeIDE/freertos/02-FreeRTOS/Middlewares</location>
+			<locationURI>PARENT-1-PROJECT_LOC/User/Middlewares</locationURI>
 		</link>
 		<link>
 			<name>Drivers/CMSIS/system_stm32l4xx.c</name>
