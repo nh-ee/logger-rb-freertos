@@ -42,6 +42,11 @@
 			<locationURI>PARENT-1-PROJECT_LOC/User/Middlewares</locationURI>
 		</link>
 		<link>
+			<name>Application/User/AppSrc</name>
+			<type>2</type>
+			<locationURI>PARENT-1-PROJECT_LOC/User/AppSrc</locationURI>
+		</link>
+		<link>
 			<name>Drivers/CMSIS/system_stm32l4xx.c</name>
 			<type>1</type>
 			<locationURI>PARENT-1-PROJECT_LOC/Core/Src/system_stm32l4xx.c</locationURI>
