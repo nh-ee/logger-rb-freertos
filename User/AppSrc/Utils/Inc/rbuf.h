@@ -6,63 +6,78 @@
 #include <stdbool.h>
 
 typedef struct RingBuffer {
-    uint8_t  *buffer;               // User-provided storage
-    uint32_t  size;                 // Total buffer size
-    volatile uint32_t head;         // Write index
-    volatile uint32_t tail;         // Read index
-    volatile uint32_t write_failures; // Count of failed writes (buffer full)
+    uint8_t  *buffer;          // User-provided storage
+    uint32_t size;            	// Total buffer size
+    uint32_t wr_idx;         	// Write index
+    uint32_t rd_idx;         	// Read index
+    uint32_t write_failures; 	// Count of failed writes (buffer full)
 } RingBuffer_t ;
 
-/* Initialize ring buffer */
+// Initialize ring buffer
 static inline void ring_buffer_init( RingBuffer_t *rb,
                             uint8_t *buffer, uint32_t size ) {
     rb->buffer = buffer;
     rb->size = size;
-    rb->head = 0;
-    rb->tail = 0;
+    rb->wr_idx = 0;
+    rb->rd_idx = 0;
     rb->write_failures = 0;
 }
 
-/* Check if buffer is empty */
+// Check if buffer is empty
 static inline bool ring_buffer_is_empty( const RingBuffer_t *rb ) {
-    return rb->head == rb->tail;
+    return rb->wr_idx == rb->rd_idx;
 }
 
-/* Check if buffer is full (one slot is unused) */
+// Check if buffer is full (one slot is unused)
 static inline bool ring_buffer_is_full( const RingBuffer_t *rb ) {
-    return ( (rb->head + 1) % rb->size ) == rb->tail;
+    return ( (rb->wr_idx + 1) % rb->size ) == rb->rd_idx;
 }
 
-/* Bytes available to read */
+// Bytes available to read
 static inline uint32_t ring_buffer_available_read( const RingBuffer_t *rb ) {
-    return (rb->head + rb->size - rb->tail) % rb->size;
+    return (rb->wr_idx + rb->size - rb->rd_idx) % rb->size;
 }
 
-/* Bytes available to write */
+// Bytes available to write
 static inline uint32_t ring_buffer_available_write( const RingBuffer_t *rb ) {
     return (rb->size - 1) - ring_buffer_available_read( rb );
 }
 
-/* Write one byte to buffer */
+// Write one byte to buffer
 static inline bool ring_buffer_write( RingBuffer_t *rb, uint8_t data ) {
     if ( ring_buffer_is_full( rb ) ) {
         rb->write_failures++;
         return false;
     }
 
-    rb->buffer[rb->head] = data;
-    rb->head = (rb->head + 1) % rb->size;
+    rb->buffer[rb->wr_idx] = data;
+    rb->wr_idx = (rb->wr_idx + 1) % rb->size;
     return true;
 }
 
-/* Read one byte from buffer */
+// Write multiple bytes to buffer
+static inline bool ring_buffer_write_multiple( RingBuffer_t *rb, const uint8_t *data, uint32_t w_len ) {
+	if ( ring_buffer_available_write( rb ) < w_len ) {
+		rb->write_failures++;
+		return false;
+	}
+
+	for ( uint32_t idx = 0; idx < w_len; idx++ ) {
+	    rb->buffer[rb->wr_idx] = data[idx];
+	    rb->wr_idx = (rb->wr_idx + 1) % rb->size;
+	}
+
+	return true;
+}
+
+// Read one byte from buffer
 static inline bool ring_buffer_read( RingBuffer_t *rb, uint8_t *data ) {
     if ( ring_buffer_is_empty( rb ) ) {
         return false;
     }
 
-    *data = rb->buffer[rb->tail];
-    rb->tail = (rb->tail + 1) % rb->size;
+    *data = rb->buffer[rb->rd_idx];
+    rb->rd_idx = (rb->rd_idx + 1) % rb->size;
     return true;
 }
 

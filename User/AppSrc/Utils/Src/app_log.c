@@ -4,16 +4,62 @@
 
 #include "stm32l4xx.h"
 
+#include "FreeRTOS.h"
+#include "task.h"
+#include "semphr.h"
+
 #include "app_log.h"
 #include "rbuf.h"
 
 extern UART_HandleTypeDef huart1;
-// Get lock
 
-int u32_to_str( char *buf, uint32_t value ) {
+#define APP_LOG_SCHEME_NONE				0
+#define APP_LOG_SCHEME_DBUF				1
+#define APP_LOG_SCHEME_RBUF				2
+#define APP_LOG_SCHEME_RBUF_IDLE		3
+
+#define APP_LOG_SCHEME					( APP_LOG_SCHEME_RBUF_IDLE )
+
+static volatile uint8_t su8_tx_dma_busy = 1;
+
+#if ( APP_LOG_SCHEME == APP_LOG_SCHEME_DBUF )
+
+#define UART_BUFFER_SIZE 32
+static uint8_t uart_tx_buffer_1[UART_BUFFER_SIZE] = { 0 };
+static uint8_t uart_tx_buffer_2[UART_BUFFER_SIZE] = { 0 };
+static uint8_t *current_buffer = uart_tx_buffer_1;
+static uint8_t *transmit_buffer = uart_tx_buffer_1;
+volatile uint16_t uart_tx_idx = 0;
+
+#elif ( APP_LOG_SCHEME == APP_LOG_SCHEME_RBUF )
+
+#define LOG_BUF_SIZE 128
+static uint8_t log_dbuf[LOG_BUF_SIZE] = { 0 };
+static RingBuffer_t log_rb;
+static uint32_t su32_dma_tx_len = 0;
+
+#elif ( APP_LOG_SCHEME == APP_LOG_SCHEME_RBUF_IDLE )
+
+#define app_log	printf
+
+#define AL_BUF_SIZE				( 1024 )
+#define MSG_FMT_BUF_SIZE		( 128 + 12 )
+static uint8_t su8_al_dbuf[AL_BUF_SIZE] = { 0 };
+static uint8_t su8_msg_buf[MSG_FMT_BUF_SIZE] = { 0 };
+static RingBuffer_t sx_al_rb;
+static SemaphoreHandle_t sx_al_mutex = NULL;
+static uint32_t su32_dma_tx_len = 0;
+
+#else
+
+#error "Define logging module buffer scheme"
+
+#endif
+
+int u32_to_str( uint8_t *buf, uint32_t value ) {
     int idx = 0;
 
-    if ( value == 0 ) {
+    if ( 0 == value ) {
         buf[idx++] = '0';
     }
     else {
@@ -31,85 +77,116 @@ int u32_to_str( char *buf, uint32_t value ) {
         }
     }
 
-    return idx;
+    return ( idx );
 }
 
-#define USE_RBUF		0
-
-volatile uint8_t tx_in_progress = 1;
-
-#if USE_RBUF
-#define UART_BUFFER_SIZE 32
-uint8_t uart_tx_buffer_1[UART_BUFFER_SIZE];
-uint8_t uart_tx_buffer_2[UART_BUFFER_SIZE];
-
-uint8_t *current_buffer = uart_tx_buffer_1;
-uint8_t *transmit_buffer = uart_tx_buffer_1;
-volatile uint16_t uart_tx_idx = 0;
-#else
-#define LOG_BUF_SIZE 128
-static uint8_t log_dbuf[LOG_BUF_SIZE] = { 0 };
-static RingBuffer_t log_rb;
-static uint32_t dma_tx_length = 0;
-
-void log_flush(void) {
-    if ( tx_in_progress ) {
+#if ( APP_LOG_SCHEME == APP_LOG_SCHEME_RBUF )
+void log_flush( void ) {
+    if ( su8_tx_dma_busy ) {
         return;
     }
 
-    uint32_t available = ring_buffer_available_read( &log_rb );
-    if ( available == 0 ) {
+    uint32_t u32_rb_avail = ring_buffer_available_read( &log_rb );
+    if ( 0 == u32_rb_avail ) {
         return;
     }
 
     /* DMA can only send a contiguous block */
-    uint32_t tail = log_rb.tail;
-    uint32_t head = log_rb.head;
+    uint32_t rd_idx = log_rb.rd_idx;
+    uint32_t wr_idx = log_rb.wr_idx;
 
-    if ( head > tail ) {
-        dma_tx_length = head - tail;
+    if ( wr_idx > rd_idx ) {
+    	su32_dma_tx_len = wr_idx - rd_idx;
     }
     else {
-        dma_tx_length = log_rb.size - tail;
+    	su32_dma_tx_len = log_rb.size - rd_idx;
     }
 
-    tx_in_progress = 1;
+    su8_tx_dma_busy = 1;
 
-    HAL_UART_Transmit_DMA( &huart1, &log_rb.buffer[tail], dma_tx_length );
+    HAL_UART_Transmit_DMA( &huart1, &log_rb.buffer[rd_idx], su32_dma_tx_len );
 }
-
 #endif
 
-void HAL_UART_TxCpltCallback( UART_HandleTypeDef *huart ) {
-	if ( huart != &huart1 ) {
+#if ( APP_LOG_SCHEME == APP_LOG_SCHEME_RBUF_IDLE )
+int app_log( const char *fmt, ... ) {
+
+	// Get lock
+	if ( NULL == sx_al_mutex ) {
+		return 0;
+	}
+
+	uint32_t msg_len = 0;
+	uint32_t ts_len = 0;
+
+	uint32_t u32_time_ms = HAL_GetTick();
+	ts_len = u32_to_str( &su8_msg_buf[msg_len], u32_time_ms );
+	msg_len += ts_len;
+	su8_msg_buf[msg_len++] = ' ';
+
+	va_list args;
+	va_start( args, fmt );
+	msg_len += vsnprintf( (char *)&su8_msg_buf[msg_len], MSG_FMT_BUF_SIZE - ts_len - 1, fmt, args );
+	va_end( args );
+
+	if ( xSemaphoreTake( sx_al_mutex, portMAX_DELAY ) ) {
+		if ( !ring_buffer_write_multiple( &sx_al_rb, su8_msg_buf, msg_len ) ) {
+			msg_len = 0;
+		}
+		xSemaphoreGive( sx_al_mutex );
+	}
+
+    return ( msg_len );
+}
+
+void app_log_process( void ) {
+	if ( su8_tx_dma_busy ) {
 		return;
 	}
 
-#if (USE_RBUF == 0)
-	/* Advance tail */
-	log_rb.tail = ( log_rb.tail + dma_tx_length ) % log_rb.size;
-#endif
+	uint32_t u32_rb_avail = ring_buffer_available_read( &sx_al_rb );
+	if ( 0 == u32_rb_avail ) {
+		return;
+	}
 
-	tx_in_progress = 0;
+	/* DMA can only send a contiguous block */
+	uint32_t rd_idx = sx_al_rb.rd_idx;
+	uint32_t wr_idx = sx_al_rb.wr_idx;
+
+	if ( wr_idx > rd_idx ) {
+		su32_dma_tx_len = wr_idx - rd_idx;
+	}
+	else {
+		su32_dma_tx_len = sx_al_rb.size - rd_idx;
+	}
+
+	su8_tx_dma_busy = 1;
+
+	HAL_UART_Transmit_DMA( &huart1, &sx_al_rb.buffer[rd_idx], su32_dma_tx_len );
 }
+#else
+void app_log_process( void ) {
+
+}
+#endif
 
 /**
   * @brief  Retargets the C library printf function to the USART.
   * @param  None
   * @retval None
   */
-int __io_putchar(int ch) {
+int __io_putchar( int ch ) {
     /* Place your implementation of fputc here */
     /* e.g. write a character to the LPUART1 and Loop until the end of transmission */
     //HAL_UART_Transmit( &huart1, (uint8_t *)&ch, 1, 0xFFFF );
 
-#if USE_RBUF
+#if ( APP_LOG_SCHEME == APP_LOG_SCHEME_DBUF )
 	// If the current buffer is full, swap the buffers and start DMA transfer
 	if ( uart_tx_idx >= UART_BUFFER_SIZE || ch == '\n' ) {
 		// Swap buffers if DMA isn't already in progress
-		if ( !tx_in_progress ) {
+		if ( !su8_tx_dma_busy ) {
 			// Start DMA transfer of the current buffer
-			tx_in_progress = 1;
+			su8_tx_dma_busy = 1;
 
 			transmit_buffer = current_buffer;
 
@@ -127,55 +204,42 @@ int __io_putchar(int ch) {
 			}
 		}
 	}
-
 	// Add the character to the current buffer
 	current_buffer[uart_tx_idx++] = (uint8_t) ch;
-#else
-
+#elif ( APP_LOG_SCHEME == APP_LOG_SCHEME_RBUF )
 	ring_buffer_write( &log_rb, ch );
-
 	if ( ch == '\n' || ring_buffer_available_read( &log_rb ) > 10  ) {
 		log_flush();
 	}
+#else
 
 #endif
 
-    return ch;
+    return ( ch );
 }
 
 void log_init( void ) {
-#if (USE_RBUF == 0)
+#if ( APP_LOG_SCHEME == APP_LOG_SCHEME_RBUF )
 	ring_buffer_init( &log_rb, log_dbuf, LOG_BUF_SIZE );
+#elif ( APP_LOG_SCHEME == APP_LOG_SCHEME_RBUF_IDLE )
+	ring_buffer_init( &sx_al_rb, su8_al_dbuf, AL_BUF_SIZE );
+	sx_al_mutex = xSemaphoreCreateMutex();
+#else
 #endif
 }
 
-int app_log( const char *fmt, ... ) {
+void HAL_UART_TxCpltCallback( UART_HandleTypeDef *huart ) {
+	if ( huart != &huart1 ) {
+		return;
+	}
 
-	// Get lock
+#if ( APP_LOG_SCHEME == APP_LOG_SCHEME_RBUF )
+	/* Advance rd_idx */
+	log_rb.rd_idx = ( log_rb.rd_idx + su32_dma_tx_len ) % log_rb.size;
+#elif ( APP_LOG_SCHEME == APP_LOG_SCHEME_RBUF_IDLE )
+	sx_al_rb.rd_idx = ( sx_al_rb.rd_idx + su32_dma_tx_len ) % sx_al_rb.size;
+#else
+#endif
 
-    char log_message[256];
-    char timestamp_buf[20];
-    va_list args;
-    int len = 0;
-
-    // Get the timestamp and convert it to a string
-    uint32_t timestamp = HAL_GetTick();
-    int ts_len = u32_to_str( timestamp_buf, timestamp );
-    timestamp_buf[ts_len++] = ' ';
-
-    // Add timestamp to log message
-    for ( int i = 0; i < ts_len; i++ ) {
-        log_message[len++] = timestamp_buf[i];
-    }
-
-    // Process the format string and append it after the timestamp
-    va_start( args, fmt );
-    len += vsnprintf( &log_message[len], sizeof(log_message) - len, fmt, args );
-    va_end( args );
-
-    return 0;
-}
-
-void app_log_process( void ) {
-
+	su8_tx_dma_busy = 0;
 }

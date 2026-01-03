@@ -4,6 +4,7 @@
 #include "FreeRTOS.h"
 #include "task.h"
 
+#include "app_log.h"
 
 /*********************************************************************
 *
@@ -51,6 +52,8 @@ void vApplicationStackOverflowHook(TaskHandle_t xTask, char * pcTaskName) {
 *
 */
 void vApplicationIdleHook(void) {
+	app_log_process();
+
 #if configSUPPORT_DYNAMIC_ALLOCATION == 1
   volatile size_t xFreeHeapSpace;
 
