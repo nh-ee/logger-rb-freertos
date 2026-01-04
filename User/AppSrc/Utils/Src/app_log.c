@@ -22,6 +22,8 @@ extern UART_HandleTypeDef huart1;
 
 static volatile uint8_t su8_tx_dma_busy = 1;
 
+static pfn_time_ms_t pfn_log_time_ms = NULL;
+
 #if ( APP_LOG_SCHEME == APP_LOG_SCHEME_DBUF )
 
 #define UART_BUFFER_SIZE 32
@@ -119,10 +121,12 @@ int app_log( const char *fmt, ... ) {
 	uint32_t msg_len = 0;
 	uint32_t ts_len = 0;
 
-	uint32_t u32_time_ms = HAL_GetTick();
-	ts_len = u32_to_str( &su8_msg_buf[msg_len], u32_time_ms );
-	msg_len += ts_len;
-	su8_msg_buf[msg_len++] = ' ';
+	if ( NULL != pfn_log_time_ms ) {
+		uint32_t u32_time_ms = pfn_log_time_ms();
+		ts_len = u32_to_str( &su8_msg_buf[msg_len], u32_time_ms );
+		msg_len += ts_len;
+		su8_msg_buf[msg_len++] = ' ';
+	}
 
 	va_list args;
 	va_start( args, fmt );
@@ -218,7 +222,11 @@ int __io_putchar( int ch ) {
     return ( ch );
 }
 
-void log_init( void ) {
+void log_init( pfn_time_ms_t pfn ) {
+	if ( NULL != pfn ) {
+		pfn_log_time_ms = pfn;
+	}
+
 #if ( APP_LOG_SCHEME == APP_LOG_SCHEME_RBUF )
 	ring_buffer_init( &log_rb, log_dbuf, LOG_BUF_SIZE );
 #elif ( APP_LOG_SCHEME == APP_LOG_SCHEME_RBUF_IDLE )

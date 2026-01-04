@@ -101,7 +101,7 @@ int main(void)
 
   /* USER CODE BEGIN SysInit */
 
-  log_init();
+  log_init( HAL_GetTick );
 
   /* USER CODE END SysInit */
 
