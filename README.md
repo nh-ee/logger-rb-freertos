@@ -36,12 +36,17 @@ Logs are stored in a **ring buffer** and transmitted via **UART using DMA**, ens
 | 1. | User/AppSrc/Utils/Src/app_log.c | Core logger implementation |
 | 2. | User/AppSrc/Utils/Inc/app_log.h | Logger API declarations |
 | 3. | User/AppSrc/Utils/Inc/app_log_config.h | Optional configuration overrides |
-| 4. | User/AppSrc/Utils/Src/rbuf.c | Optional configuration overrides |
-| 5. | User/AppSrc/Utils/Inc/rbuf.h | Optional configuration overrides |
+| 4. | User/AppSrc/Utils/Src/rbuf.c | Ring Buffer core logic implementation |
+| 5. | User/AppSrc/Utils/Inc/rbuf.h | Ring Buffer API declarations |
 
 #### 2. Implement Logger backend interface and configuration
 - Hardware initialization along with interrupt handling
 - Logger module configuartion
+- Implementation of backend transfer API
+```c
+bool app_log_transport( const uint8_t *pu8_data, uint32_t u32_len ) {
+}
+```
 
 #### 3. Mandatory API calls from Logger Module
 - `app_log_transport_done` must be called once the backend finished the transfer of current chunk.
@@ -53,6 +58,9 @@ void backend_xfer_complete_cb( void ) {
 ```
 - `app_log_process` to be called from IDLE Hook or desired source location to initiate a backend transfer.
 
+### Implementation notes
+- Virtual folder `Middlewares` created under `{Project Root}` folder and linked sources from `{Project Root}/User/Middlewares`.
+- Virtual folder `AppSrc` created under `{Project Root}/Application/User` directory and linked sources from `{Project Root}/User/AppSrc`.
 
 
 
