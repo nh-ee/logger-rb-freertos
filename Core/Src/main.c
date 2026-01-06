@@ -32,6 +32,7 @@
 #include "task_l.h"
 
 #include "app_log.h"
+#include "app_log_transport.h"
 
 /* USER CODE END Includes */
 
@@ -72,6 +73,11 @@ static void MX_USART1_UART_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+static app_log_if_t sx_app_log_if = {
+    .pfn_flush = app_log_transport,
+    .pfn_time = HAL_GetTick,
+};
+
 const uint8_t u8_msg[] = "FreeRTOS Example Project\r\n";
 
 /* USER CODE END 0 */
@@ -101,7 +107,7 @@ int main(void)
 
   /* USER CODE BEGIN SysInit */
 
-  log_init( HAL_GetTick );
+  log_init( &sx_app_log_if );
 
   /* USER CODE END SysInit */
 

@@ -20,9 +20,11 @@ extern UART_HandleTypeDef huart1;
 
 #define APP_LOG_SCHEME					( APP_LOG_SCHEME_RBUF_IDLE )
 
-static volatile uint8_t su8_tx_dma_busy = 1;
+static bool sx_log_transport_busy = true;
 
 static pfn_time_ms_t pfn_log_time_ms = NULL;
+
+static pfn_log_flush_t pfn_log_flush = NULL;
 
 #if ( APP_LOG_SCHEME == APP_LOG_SCHEME_DBUF )
 
@@ -84,7 +86,7 @@ int u32_to_str( uint8_t *buf, uint32_t value ) {
 
 #if ( APP_LOG_SCHEME == APP_LOG_SCHEME_RBUF )
 void log_flush( void ) {
-    if ( su8_tx_dma_busy ) {
+    if ( true == sx_log_transport_busy ) {
         return;
     }
 
@@ -104,7 +106,7 @@ void log_flush( void ) {
     	su32_dma_tx_len = log_rb.size - rd_idx;
     }
 
-    su8_tx_dma_busy = 1;
+    sx_log_transport_busy = true;
 
     HAL_UART_Transmit_DMA( &huart1, &log_rb.buffer[rd_idx], su32_dma_tx_len );
 }
@@ -144,7 +146,7 @@ int app_log( const char *fmt, ... ) {
 }
 
 void app_log_process( void ) {
-	if ( su8_tx_dma_busy ) {
+	if ( true == sx_log_transport_busy ) {
 		return;
 	}
 
@@ -164,9 +166,12 @@ void app_log_process( void ) {
 		su32_dma_tx_len = sx_al_rb.size - rd_idx;
 	}
 
-	su8_tx_dma_busy = 1;
+	sx_log_transport_busy = true;
 
-	HAL_UART_Transmit_DMA( &huart1, &sx_al_rb.buffer[rd_idx], su32_dma_tx_len );
+	//HAL_UART_Transmit_DMA( &huart1, &sx_al_rb.buffer[rd_idx], su32_dma_tx_len );
+	if ( NULL != pfn_log_flush ) {
+		pfn_log_flush( &sx_al_rb.buffer[rd_idx], su32_dma_tx_len );
+	}
 }
 #else
 void app_log_process( void ) {
@@ -188,9 +193,9 @@ int __io_putchar( int ch ) {
 	// If the current buffer is full, swap the buffers and start DMA transfer
 	if ( uart_tx_idx >= UART_BUFFER_SIZE || ch == '\n' ) {
 		// Swap buffers if DMA isn't already in progress
-		if ( !su8_tx_dma_busy ) {
+		if ( !sx_log_transport_busy ) {
 			// Start DMA transfer of the current buffer
-			su8_tx_dma_busy = 1;
+			sx_log_transport_busy = true;
 
 			transmit_buffer = current_buffer;
 
@@ -222,9 +227,13 @@ int __io_putchar( int ch ) {
     return ( ch );
 }
 
-void log_init( pfn_time_ms_t pfn ) {
-	if ( NULL != pfn ) {
-		pfn_log_time_ms = pfn;
+void log_init(app_log_if_t *px_log_if ) {
+	if ( NULL != px_log_if->pfn_time ) {
+		pfn_log_time_ms = px_log_if->pfn_time;
+	}
+
+	if ( NULL != px_log_if->pfn_flush ) {
+		pfn_log_flush = px_log_if->pfn_flush;
 	}
 
 #if ( APP_LOG_SCHEME == APP_LOG_SCHEME_RBUF )
@@ -236,11 +245,7 @@ void log_init( pfn_time_ms_t pfn ) {
 #endif
 }
 
-void HAL_UART_TxCpltCallback( UART_HandleTypeDef *huart ) {
-	if ( huart != &huart1 ) {
-		return;
-	}
-
+void app_log_transport_done( void ) {
 #if ( APP_LOG_SCHEME == APP_LOG_SCHEME_RBUF )
 	/* Advance rd_idx */
 	log_rb.rd_idx = ( log_rb.rd_idx + su32_dma_tx_len ) % log_rb.size;
@@ -249,5 +254,5 @@ void HAL_UART_TxCpltCallback( UART_HandleTypeDef *huart ) {
 #else
 #endif
 
-	su8_tx_dma_busy = 0;
+	sx_log_transport_busy = false;
 }
