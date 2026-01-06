@@ -5,80 +5,78 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+/**
+ * @brief Ring buffer data structure definition
+ */
 typedef struct RingBuffer {
-    uint8_t  *buffer;          // User-provided storage
-    uint32_t size;            	// Total buffer size
-    uint32_t wr_idx;         	// Write index
-    uint32_t rd_idx;         	// Read index
-    uint32_t write_failures; 	// Count of failed writes (buffer full)
+    uint8_t  *buffer;           //< User-provided storage
+    uint32_t size;            	//< Total buffer size
+    uint32_t wr_idx;         	//< Write index
+    uint32_t rd_idx;         	//< Read index
+    uint32_t write_failures; 	//< Count of failed writes (buffer full)
 } RingBuffer_t ;
 
-// Initialize ring buffer
-static inline void ring_buffer_init( RingBuffer_t *rb,
-                            uint8_t *buffer, uint32_t size ) {
-    rb->buffer = buffer;
-    rb->size = size;
-    rb->wr_idx = 0;
-    rb->rd_idx = 0;
-    rb->write_failures = 0;
-}
+/**
+ * @brief Initialize a ring buffer
+ * @param[in] px_rb Pointer to ring buffer data structure
+ * @param[in] pu8_dbuf Pointer to data buffer
+ * @param[in] u32_size Total length of data buffer
+ * @return None
+ */
+void ring_buffer_init( RingBuffer_t *px_rb, uint8_t *pu8_dbuf, uint32_t u32_size );
 
-// Check if buffer is empty
-static inline bool ring_buffer_is_empty( const RingBuffer_t *rb ) {
-    return rb->wr_idx == rb->rd_idx;
-}
+/**
+ * @brief API checks if ring buffer is empty
+ * @param[in] px_rb Pointer to ring buffer data structure
+ * @return true on empty, false otherwise
+ */
+bool ring_buffer_is_empty( const RingBuffer_t *px_rb );
 
-// Check if buffer is full (one slot is unused)
-static inline bool ring_buffer_is_full( const RingBuffer_t *rb ) {
-    return ( (rb->wr_idx + 1) % rb->size ) == rb->rd_idx;
-}
+/**
+ * @brief API checks if ring buffer is full
+ * @param[in] px_rb Pointer to ring buffer data structure
+ * @return true on full, false otherwise
+ */
+bool ring_buffer_is_full( const RingBuffer_t *px_rb );
 
-// Bytes available to read
-static inline uint32_t ring_buffer_available_read( const RingBuffer_t *rb ) {
-    return (rb->wr_idx + rb->size - rb->rd_idx) % rb->size;
-}
+/**
+ * @brief API checks if data is available to read from ring buffer
+ * @param[in] px_rb Pointer to ring buffer data structure
+ * @return amount of available bytes can be read (uint32_t type)
+ */
+uint32_t ring_buffer_available_read( const RingBuffer_t *px_rb );
 
-// Bytes available to write
-static inline uint32_t ring_buffer_available_write( const RingBuffer_t *rb ) {
-    return (rb->size - 1) - ring_buffer_available_read( rb );
-}
+/**
+ * @brief API checks if data can be written into ring buffer
+ * @param[in] px_rb Pointer to ring buffer data structure
+ * @return amount of available bytes can be written (uint32_t type)
+ */
+uint32_t ring_buffer_available_write( const RingBuffer_t *px_rb );
 
-// Write one byte to buffer
-static inline bool ring_buffer_write( RingBuffer_t *rb, uint8_t data ) {
-    if ( ring_buffer_is_full( rb ) ) {
-        rb->write_failures++;
-        return false;
-    }
+/**
+ * @brief API writes single byte into ring buffer
+ * @param[in] px_rb Pointer to ring buffer data structure
+ * @param[in] u8_data data to write
+ * @return true on successful write, false otherwise
+ */
+bool ring_buffer_write( RingBuffer_t *px_rb, uint8_t u8_data );
 
-    rb->buffer[rb->wr_idx] = data;
-    rb->wr_idx = (rb->wr_idx + 1) % rb->size;
-    return true;
-}
+/**
+ * @brief API writes multiple bytes into ring buffer
+ * @param[in] px_rb Pointer to ring buffer data structure
+ * @param[in] pu8_dbuf Pointer to data buffer to be written
+ * @param[in] u32_len length of data to be written
+ * @return true on successful write, false otherwise
+ */
+bool ring_buffer_write_multiple( RingBuffer_t *px_rb,
+                                 const uint8_t *pu8_dbuf, uint32_t u32_len );
 
-// Write multiple bytes to buffer
-static inline bool ring_buffer_write_multiple( RingBuffer_t *rb, const uint8_t *data, uint32_t w_len ) {
-	if ( ring_buffer_available_write( rb ) < w_len ) {
-		rb->write_failures++;
-		return false;
-	}
-
-	for ( uint32_t idx = 0; idx < w_len; idx++ ) {
-	    rb->buffer[rb->wr_idx] = data[idx];
-	    rb->wr_idx = (rb->wr_idx + 1) % rb->size;
-	}
-
-	return true;
-}
-
-// Read one byte from buffer
-static inline bool ring_buffer_read( RingBuffer_t *rb, uint8_t *data ) {
-    if ( ring_buffer_is_empty( rb ) ) {
-        return false;
-    }
-
-    *data = rb->buffer[rb->rd_idx];
-    rb->rd_idx = (rb->rd_idx + 1) % rb->size;
-    return true;
-}
+/**
+ * @brief API reads single byte from ring buffer
+ * @param[in] px_rb Pointer to ring buffer data structure
+ * @param[in] pu8_data pointer to data storing varible (uint8_t type)
+ * @return true on successful read, false otherwise
+ */
+bool ring_buffer_read( RingBuffer_t *px_rb, uint8_t *pu8_data );
 
 #endif /* RING_BUFFER_H */

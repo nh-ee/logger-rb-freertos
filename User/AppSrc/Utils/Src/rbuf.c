@@ -1,49 +1,66 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define BUFFER_SIZE 128   				// Define the buffer size (can be adjusted)
+#include "rbuf.h"
 
-typedef struct {
-    uint8_t buffer[BUFFER_SIZE];   		// Buffer to hold data
-    volatile uint32_t head;        		// Write pointer
-    volatile uint32_t tail;        		// Read pointer
-    volatile uint32_t write_failures;  	// Count of write failures due to buffer being full
-} RingBuffer;
-
-// Initialize the ring buffer
-void ring_buffer_init(RingBuffer* rb) {
-    rb->head = 0;
-    rb->tail = 0;
-    rb->write_failures = 0;  // Initialize failure count to zero
+void ring_buffer_init( RingBuffer_t *px_rb, uint8_t *pu8_dbuf, uint32_t u32_size ) {
+    px_rb->buffer = pu8_dbuf;
+    px_rb->size = u32_size;
+    px_rb->wr_idx = 0;
+    px_rb->rd_idx = 0;
+    px_rb->write_failures = 0;
 }
 
-// Check if the ring buffer is empty
-bool ring_buffer_is_empty(RingBuffer* rb) {
-    return rb->head == rb->tail;
+bool ring_buffer_is_empty( const RingBuffer_t *px_rb ) {
+    return px_rb->wr_idx == px_rb->rd_idx;
 }
 
-// Check if the ring buffer is full
-bool ring_buffer_is_full(RingBuffer* rb) {
-    return ((rb->head + 1) % BUFFER_SIZE) == rb->tail;
+bool ring_buffer_is_full( const RingBuffer_t *px_rb ) {
+    return ( (px_rb->wr_idx + 1) % px_rb->size ) == px_rb->rd_idx;
 }
 
-// Write data to the ring buffer
-bool ring_buffer_write(RingBuffer* rb, uint8_t data) {
-    if (ring_buffer_is_full(rb)) {
-        rb->write_failures++;  // Increment failure counter when write fails
-        return false; // Buffer is full, cannot write
+uint32_t ring_buffer_available_read( const RingBuffer_t *px_rb ) {
+    return (px_rb->wr_idx + px_rb->size - px_rb->rd_idx) % px_rb->size;
+}
+
+uint32_t ring_buffer_available_write( const RingBuffer_t *px_rb ) {
+    return (px_rb->size - 1) - ring_buffer_available_read( px_rb );
+}
+
+bool ring_buffer_write( RingBuffer_t *px_rb, uint8_t u8_data ) {
+    if ( ring_buffer_is_full( px_rb ) ) {
+        px_rb->write_failures++;
+        return ( false );
     }
-    rb->buffer[rb->head] = data;
-    rb->head = (rb->head + 1) % BUFFER_SIZE;
-    return true;
+
+    px_rb->buffer[px_rb->wr_idx] = u8_data;
+    px_rb->wr_idx = (px_rb->wr_idx + 1) % px_rb->size;
+
+    return ( true );
 }
 
-// Read data from the ring buffer
-bool ring_buffer_read(RingBuffer* rb, uint8_t* data) {
-    if (ring_buffer_is_empty(rb)) {
-        return false; // Buffer is empty, cannot read
+bool ring_buffer_write_multiple( RingBuffer_t *px_rb,
+                                 const uint8_t *pu8_dbuf, uint32_t u32_len ) {
+	if ( ring_buffer_available_write( px_rb ) < u32_len ) {
+		px_rb->write_failures++;
+		return ( false );
+	}
+
+	for ( uint32_t idx = 0; idx < u32_len; idx++ ) {
+	    px_rb->buffer[px_rb->wr_idx] = pu8_dbuf[idx];
+	    px_rb->wr_idx = (px_rb->wr_idx + 1) % px_rb->size;
+	}
+
+	return ( true );
+}
+
+bool ring_buffer_read( RingBuffer_t *px_rb, uint8_t *pu8_data ) {
+    if ( ring_buffer_is_empty( px_rb ) ) {
+        return ( false );
     }
-    *data = rb->buffer[rb->tail];
-    rb->tail = (rb->tail + 1) % BUFFER_SIZE;
-    return true;
+
+    *pu8_data = px_rb->buffer[px_rb->rd_idx];
+    px_rb->rd_idx = (px_rb->rd_idx + 1) % px_rb->size;
+
+    return ( true );
 }
