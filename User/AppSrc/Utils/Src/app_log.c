@@ -133,7 +133,6 @@ void app_log_process( void ) {
 
 	sx_log_transport_busy = true;
 
-	//HAL_UART_Transmit_DMA( &huart1, &sx_al_rb.buffer[rd_idx], su32_dma_tx_len );
 	if ( NULL != pfn_log_flush ) {
 		pfn_log_flush( &sx_al_rb.buffer[rd_idx], su32_dma_tx_len );
 	}
